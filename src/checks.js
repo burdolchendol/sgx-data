@@ -37,7 +37,10 @@ export function runChecks(values) {
 
   if (has(v.netIncome) && has(v.dilutedShares) && has(v.epsDiluted) && v.dilutedShares !== 0) {
     const implied = v.netIncome / v.dilutedShares;
-    if (!within(implied, v.epsDiluted, 0.05)) {
+    // EPS is printed rounded (e.g. "(0.01)" for -0.0051), so also allow half of its last printed digit
+    const decimals = (String(Math.abs(v.epsDiluted)).split('.')[1] ?? '').length;
+    const rounding = decimals ? 0.5 * 10 ** -decimals : 0;
+    if (!within(implied, v.epsDiluted, 0.05) && Math.abs(implied - v.epsDiluted) > rounding + 1e-12) {
       fail('eps', `netIncome/dilutedShares ${implied.toFixed(4)} vs epsDiluted ${v.epsDiluted}`,
         ['netIncome', 'dilutedShares', 'epsDiluted']);
     }

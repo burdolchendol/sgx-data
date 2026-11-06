@@ -30,6 +30,13 @@ test('EPS check within 5%', () => {
   assert.equal(r.values.epsDiluted, null);
 });
 
+test('EPS check allows for the rounding of the printed EPS', () => {
+  // -924 / 180,291 = -0.0051, printed as (0.01): within half a cent of rounding
+  assert.equal(runChecks({ ...base, netIncome: -924, dilutedShares: 180_291, epsDiluted: -0.01 }).failures.length, 0);
+  // -0.0051 printed as (0.02) is wrong whatever the rounding
+  assert.equal(runChecks({ ...base, netIncome: -924, dilutedShares: 180_291, epsDiluted: -0.02 }).failures[0].check, 'eps');
+});
+
 test('undetected currency or units blanks the whole year', () => {
   const r = runChecks({ reportingCurrency: null, unitsDetected: true, revenue: 5 });
   assert.equal(r.values.revenue, null);

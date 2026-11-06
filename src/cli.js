@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// npm run fetch:sg [-- --only Z74] [--years 15] [--out out/sg]
+// npm run fetch:sg [-- --only Z74] [--years 15] [--out out/sg] [--local DIR]
 // Finds each company's annual reports on its IR site, reads the group statements,
 // runs the per-year checks and writes out/sg/.
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
+import { existsSync } from 'node:fs';
 import { getCached, cachePath } from './http.js';
 import { pdfPrintedPages, pdfCreationDate } from './pdf.js';
 import { extractStatements, dilutedSharesFromNotes } from './parse/statements.js';
@@ -18,6 +19,8 @@ const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i === 
 const ONLY = opt('only', null)?.split(',');
 const MAX_YEARS = Number(opt('years', 15));
 const OUT = opt('out', 'out/sg');
+// reports downloaded by hand: DIR/<TICKER>/<file name of the report's link>
+const LOCAL = opt('local', process.env.SGX_LOCAL_DIR ?? null);
 const KEEP_PDFS = process.env.SGX_KEEP_PDFS === '1';
 const EXTRACT_DIR = join(process.env.SGX_CACHE_DIR ? join(process.env.SGX_CACHE_DIR, '..') : '.cache', 'extract');
 
@@ -27,14 +30,23 @@ const sha = (s) => createHash('sha256').update(s).digest('hex');
  * Read one report (one PDF, or several section PDFs read as one), using the cached extraction
  * when these URLs were processed before.
  */
-async function readReport(urls) {
+/** A hand-downloaded copy of the report at `url`, if there is one; else download it (cached). */
+async function getReport(url, ticker) {
+  const name = decodeURIComponent(basename(new URL(url).pathname));
+  const local = LOCAL && [join(LOCAL, ticker, name), join(LOCAL, name)].find((f) => existsSync(f));
+  if (local) return { buf: await readFile(local), local: true };
+  return { buf: await getCached(url), local: false };
+}
+
+async function readReport(urls, ticker) {
   const key = urls.join(' ');
   const file = join(EXTRACT_DIR, `${sha(key)}.json`);
   try { return JSON.parse(await readFile(file, 'utf8')); } catch { /* not processed yet */ }
   const bufs = [];
   let filed = null;
   for (const url of urls) {
-    const buf = await getCached(url);
+    const { buf, local } = await getReport(url, ticker);
+    if (local) console.log(`    reading ${url.split('/').pop()} from ${LOCAL}`);
     if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('not a PDF (the site returned a web page)');
     bufs.push({ url, buf });
     const d = await pdfCreationDate(buf);
@@ -86,7 +98,7 @@ async function runCompany(company, failures) {
     let done = false;
     for (const c of candidates) {
       try {
-        const r = await readReport(c.urls);
+        const r = await readReport(c.urls, company.ticker);
         const name = c.urls.map((u) => decodeURIComponent(u.split('/').pop())).join(' + ');
         if (!r.extractions.length) { console.warn(`  ${company.ticker} ${year}: nothing read from ${name} (${r.notes.join('; ')})`); continue; }
         if (r.notes.length) console.warn(`  ${company.ticker} ${year}: ${r.notes.join('; ')}`);

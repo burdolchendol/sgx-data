@@ -142,6 +142,25 @@ export const COMPANIES = [
         `https://www.capitaland.com/content/dam/capitalandinvestment/investor-relations/publications/CapitaLand-Investment-Limited-Annual-Report-${y}.pdf`));
     },
   },
+  {
+    ticker: 'LVR',
+    name: '17LIVE Group Limited',
+    sector: 'Communication Services',
+    exchange: 'SGX Mainboard',
+    type: 'company',
+    currency: 'SGD',
+    // investor.17.live answers automated clients with an AWS WAF challenge, so its report list can't be
+    // read. These are its annual reports (listed December 2023); download them by hand into
+    // <--local folder>/LVR/ and the run reads them from there. Each link stays the src.
+    async discover() {
+      const base = 'https://investor.17.live/newsroom/';
+      return [
+        one(2025, `${base}20260401_172541_LVR_TJ4LMQVHNAMDHD0J.1.pdf`),
+        one(2024, `${base}20250407_073532_LVR_WHNJ8QL8LC7KQZO1.1.pdf`),
+        one(2023, `${base}20240408_061835_LVR_D9463THUW3PAQDQS.1.pdf`),
+      ];
+    },
+  },
 ];
 
 /** Candidates grouped by year, newest year first; within a year, lowest rank first. */

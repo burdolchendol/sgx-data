@@ -68,3 +68,24 @@ test('ComfortDelGro FY2024: "31 Dec 2024" column headers and $’mil tables', ()
   assert.equal(M(cur.values.goodwill), 1104);
   assert.deepEqual(runChecks(cur.values).failures, []);
 });
+
+test('17LIVE FY2025: one "statement of comprehensive income", US$’000, loss attributable to owners', () => {
+  const { extractions: [cur, prior], notes, shares } = read('lvr-fy2025');
+  assert.deepEqual(notes, []);
+  assert.equal(cur.values.reportingCurrency, 'USD');
+  assert.equal(M(cur.values.revenue), 159); // "Operating revenue" 158,797
+  assert.equal(cur.values.netIncome, -924_000); // "Loss for the year, attributable to owners of the Company"
+  assert.equal(cur.values.epsDiluted, -0.01); // "Basic and diluted", in US$
+  assert.deepEqual(shares.values, [180_291_000, 177_625_000]); // basic count; the note says diluted is the same
+  assert.equal(prior.values.netIncome, -3_268_000);
+  assert.deepEqual(runChecks({ ...cur.values, dilutedShares: shares.values[0] }).failures, []); // -0.0051 prints as (0.01)
+});
+
+test('17LIVE FY2023: no non-controlling interests, so total equity is the owners’ equity (negative in 2022)', () => {
+  const { extractions: [cur, prior], notes, shares } = read('lvr-fy2023');
+  assert.deepEqual(notes, []);
+  assert.equal(M(cur.values.equity), 91);
+  assert.equal(prior.values.equity, -183_198_000);
+  assert.equal(cur.values.epsDiluted, -6.14);
+  assert.deepEqual(runChecks({ ...prior.values, dilutedShares: shares.values[1] }).failures, []);
+});
