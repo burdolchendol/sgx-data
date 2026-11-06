@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { getCached, cachePath } from './http.js';
-import { pdfPages, pdfCreationDate } from './pdf.js';
+import { pdfPrintedPages, pdfCreationDate } from './pdf.js';
 import { extractStatements, dilutedSharesFromNotes } from './parse/statements.js';
 import { mergeFiscalYears } from './fiscal.js';
 import { runChecks } from './checks.js';
@@ -23,53 +23,91 @@ const EXTRACT_DIR = join(process.env.SGX_CACHE_DIR ? join(process.env.SGX_CACHE_
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
-/** Read one report, using the cached extraction when this URL was processed before. */
-async function readReport(url) {
-  const file = join(EXTRACT_DIR, `${sha(url)}.json`);
+/**
+ * Read one report (one PDF, or several section PDFs read as one), using the cached extraction
+ * when these URLs were processed before.
+ */
+async function readReport(urls) {
+  const key = urls.join(' ');
+  const file = join(EXTRACT_DIR, `${sha(key)}.json`);
   try { return JSON.parse(await readFile(file, 'utf8')); } catch { /* not processed yet */ }
-  const buf = await getCached(url);
-  const pages = await pdfPages(buf);
-  const { extractions, notes } = extractStatements(pages, { url });
-  const filed = await pdfCreationDate(buf);
+  const bufs = [];
+  let filed = null;
+  for (const url of urls) {
+    const buf = await getCached(url);
+    if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('not a PDF (the site returned a web page)');
+    bufs.push({ url, buf });
+    const d = await pdfCreationDate(buf);
+    if (d && (!filed || d > filed)) filed = d;
+  }
+  const read = async (split) => {
+    const pages = [];
+    const refs = [];
+    for (const { url, buf } of bufs) {
+      const { pages: p, pageNo } = await pdfPrintedPages(buf, { split });
+      p.forEach((_, i) => refs.push({ url, page: pageNo[i] }));
+      pages.push(...p);
+    }
+    return { pages, refs, ...extractStatements(pages, { url: urls[0], pageRef: (i) => refs[i] }) };
+  };
+  let r = await read(null);
+  // two printed pages side by side on one sheet: read each half as its own page
+  if (r.notes.some((n) => /^no (is|bs|cf) page found$/.test(n))) {
+    const halves = await read(true);
+    const missing = (x) => x.notes.filter((n) => /^no (is|bs|cf) page found$/.test(n)).length;
+    if (missing(halves) < missing(r)) r = halves;
+  }
+  const { pages, refs, extractions, notes } = r;
   const fy = extractions[0] ? Number(extractions[0].periodEnd.slice(0, 4)) : null;
   const shares = fy ? dilutedSharesFromNotes(pages, fy) : null;
   if (shares) {
     shares.values.forEach((v, i) => {
       if (v == null || !extractions[i]) return;
       extractions[i].values.dilutedShares = v;
-      extractions[i].src.dilutedShares = { url, page: shares.page, label: shares.label };
+      extractions[i].src.dilutedShares = { ...refs[shares.page - 1], label: shares.label };
     });
   }
   for (const e of extractions) e.filed = filed;
-  const result = { url, filed, extractions, notes };
+  const result = { urls, filed, extractions, notes };
   await mkdir(EXTRACT_DIR, { recursive: true });
   await writeFile(file, JSON.stringify(result, null, 1));
-  if (!KEEP_PDFS) await rm(cachePath(url), { force: true }); // keep disk use small; the extraction is cached
+  if (!KEEP_PDFS) for (const url of urls) await rm(cachePath(url), { force: true }); // the extraction is cached
   return result;
 }
 
 async function runCompany(company, failures) {
-  const html = (await getCached(company.irPage)).toString('utf8');
-  const years = reportsByYear(company.discover(html)).slice(0, MAX_YEARS);
+  const thisYear = new Date().getUTCFullYear();
+  const wanted = Array.from({ length: MAX_YEARS + 1 }, (_, i) => thisYear - i);
+  const getText = async (url) => (await getCached(url)).toString('utf8');
+  const years = reportsByYear(await company.discover({ getText, years: wanted })).slice(0, MAX_YEARS);
   const extractions = [];
+  const unread = [];
   for (const { year, candidates } of years) {
     let done = false;
     for (const c of candidates) {
       try {
-        const r = await readReport(c.url);
-        if (!r.extractions.length) { console.warn(`  ${company.ticker} ${year}: nothing read from ${c.url} (${r.notes.join('; ')})`); continue; }
+        const r = await readReport(c.urls);
+        const name = c.urls.map((u) => decodeURIComponent(u.split('/').pop())).join(' + ');
+        if (!r.extractions.length) { console.warn(`  ${company.ticker} ${year}: nothing read from ${name} (${r.notes.join('; ')})`); continue; }
         if (r.notes.length) console.warn(`  ${company.ticker} ${year}: ${r.notes.join('; ')}`);
         extractions.push(...r.extractions);
-        console.log(`  ${company.ticker} ${year}: ${c.url.split('/').pop()}`);
+        console.log(`  ${company.ticker} ${year}: ${name}`);
         done = true;
         break;
       } catch (err) {
-        console.warn(`  ${company.ticker} ${year}: ${c.url} failed: ${err.message}`);
+        console.warn(`  ${company.ticker} ${year}: ${c.urls[0]} failed: ${err.message}`);
       }
     }
-    if (!done) failures.push({ ticker: company.ticker, error: `FY${year} report could not be read` });
+    if (!done) unread.push(year);
   }
   const merged = mergeFiscalYears(extractions, { maxYears: MAX_YEARS });
+  // a year whose own report is missing is still covered when a later report shows it as a comparative
+  const have = new Set(merged.map((y) => y.fiscalYear));
+  const missing = unread.filter((y) => !have.has(y) && y < thisYear).sort((a, b) => a - b);
+  if (missing.length) {
+    const span = missing.length > 2 ? `FY${missing[0]}–FY${missing.at(-1)} (${missing.length} years)` : missing.map((y) => `FY${y}`).join(', ');
+    failures.push({ ticker: company.ticker, error: `no readable annual report for ${span}` });
+  }
   let financialCurrency = null;
   for (const y of merged) {
     financialCurrency ??= y.values.reportingCurrency ?? null;

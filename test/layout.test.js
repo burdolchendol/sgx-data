@@ -15,7 +15,8 @@ const page = [
   '                                 8,924.4     8,191.4    2,418.8    2,747.8',
   'Fair value through other comprehensive income',
   '  (“FVOCI”) investments     27   3,589.4       736.1          -          -      Overview',
-  'Short line                          12.0',
+  'Misaligned line                      12.0',
+  'Basic                          2.76        3.56',
 ].join('\n');
 
 test('cells split on runs of 2+ spaces', () => {
@@ -41,9 +42,15 @@ test('parseRows: note numbers dropped, dashes are zero, sections and subtotals k
   assert.deepEqual(rows[2].figures, [8924.4, 8191.4, 2418.8, 2747.8]);
 });
 
-test('parseRows joins wrapped labels and ignores side tabs; skips rows with too few figures', () => {
+test('parseRows joins wrapped labels and ignores side tabs', () => {
   const { rows } = parseRows(page);
   assert.equal(rows[3].label, 'Fair value through other comprehensive income (“FVOCI”) investments');
   assert.deepEqual(rows[3].figures, [3589.4, 736.1, 0, 0]);
-  assert.equal(rows.length, 4);
+});
+
+test('parseRows places figures of short rows by column position, and skips ones that do not line up', () => {
+  const { rows } = parseRows(page);
+  assert.equal(rows.length, 5);
+  assert.equal(rows[4].label, 'Basic');
+  assert.deepEqual(rows[4].figures, [2.76, 3.56, null, null]);
 });

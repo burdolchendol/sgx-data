@@ -3,14 +3,14 @@
 const SCALE_PATTERNS = [
   // order: most specific first
   { re: /\b(billions?|bn)\b/i, scale: 1e9 },
-  { re: /\b(millions?|mil|mn|m)\b/i, scale: 1e6 },
+  { re: /\b(millions?|mil|mn)\b/i, scale: 1e6 },
   { re: /['’‘]000|\bthousands?\b|\b000s\b/i, scale: 1e3 },
 ];
 
 // Currency codes and symbols as printed in table headers, e.g. "S$'000", "US$ million", "RMB'000".
 const CURRENCY_PATTERNS = [
-  { re: /\bS\$|\bSGD\b/, code: 'SGD' },
-  { re: /\bUS\$|\bUSD\b/, code: 'USD' },
+  { re: /\bS\$|\bSGD\b|singapore dollars?/i, code: 'SGD' },
+  { re: /\bUS\$|\bUSD\b|\b(US|United States) dollars?/i, code: 'USD' },
   { re: /\bRMB\b|\bCNY\b/, code: 'CNY' },
   { re: /\bRM\b|\bMYR\b/, code: 'MYR' },
   { re: /\bHK\$|\bHKD\b/, code: 'HKD' },
@@ -30,7 +30,7 @@ export function detectUnits(header) {
   const text = String(header ?? '');
   const currency = CURRENCY_PATTERNS.find((p) => p.re.test(text))?.code ?? null;
   // "$m" style: a bare m right after a currency symbol
-  let scale = /\$\s?m\b/i.test(text) ? 1e6 : null;
+  let scale = /\$\s?m\b|\b(RM|RMB|US\$|S\$)\s?m\b|\$\s?['’‘]\s?(m|mil|mn)\b/i.test(text) ? 1e6 : null;
   if (scale == null) scale = SCALE_PATTERNS.find((p) => p.re.test(text))?.scale ?? null;
   return { currency, scale };
 }

@@ -36,15 +36,15 @@ test('without perpetual securities, Singtel fails the balance check (the trial b
   assert.equal(values.totalAssets, null);
 });
 
-test('Singtel discovery picks one report per year, statements-only PDFs first', () => {
+test('Singtel discovery picks one report per year, statements-only PDFs first', async () => {
   const z74 = COMPANIES.find((c) => c.ticker === 'Z74');
   const html = `{&quot;link&quot;:&quot;https://cdn2.singteldigital.com/content/dam/singtel/investorRelations/annualReports/2017/singtelar17-financial-statements.pdf&quot;}
     "https://cdn1.singteldigital.com/content/dam/singtel/investorRelations/annualReports/2017/singtelar17-full-AR.pdf"
     "https://cdn2.singteldigital.com/content/dam/singtel/investorRelations/annualReports/2017/singtelar17-notice-of-agm.pdf"
     "https://cdn2.singteldigital.com/content/dam/singtel/investorRelations/annualReports/2026/AR2026.pdf"
     "https://cdn2.singteldigital.com/content/dam/singtel/investorRelations/annualReports/2015/Singtel_Summary_Financial_Report_2015.pdf"`;
-  const years = reportsByYear(z74.discover(html));
+  const years = reportsByYear(await z74.discover({ getText: async () => html, years: [] }));
   assert.deepEqual(years.map((y) => y.year), [2026, 2017]);
-  assert.match(years[1].candidates[0].url, /financial-statements/);
-  assert.match(years[1].candidates[1].url, /full-AR/);
+  assert.match(years[1].candidates[0].urls[0], /financial-statements/);
+  assert.match(years[1].candidates[1].urls[0], /full-AR/);
 });
