@@ -1,0 +1,12 @@
+{
+  "name": "sgx-data",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Builds the Singapore (SGX) financial statements snapshot for the stock-screening website.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "fetch:sg": "node src/cli.js"
+  }
+}
