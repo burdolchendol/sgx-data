@@ -4,7 +4,7 @@ const SCALE_PATTERNS = [
   // order: most specific first
   { re: /\b(billions?|bn)\b/i, scale: 1e9 },
   { re: /\b(millions?|mil|mn|m)\b/i, scale: 1e6 },
-  { re: /'000|’000|\bthousands?\b|\b000s\b/i, scale: 1e3 },
+  { re: /['’‘]000|\bthousands?\b|\b000s\b/i, scale: 1e3 },
 ];
 
 // Currency codes and symbols as printed in table headers, e.g. "S$'000", "US$ million", "RMB'000".
