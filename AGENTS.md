@@ -19,7 +19,8 @@ The finished snapshot is published by this repo's GitHub Action. The website's o
 5. **Be polite to servers.** Throttle requests (at most about 1 request a second to any one host, with backoff on 429/5xx). Cache downloads, and never re-download a document you already have. Identify yourself with a sensible User-Agent, but **never hardcode a personal email address**. Read it from an environment variable.
 6. **Respect the sites' terms.** Check the terms of use and `robots.txt` of SGX and any other site before scraping, and note what you found in the README.
 7. **Don't commit bulk data to `main`.** Downloaded PDFs, caches and the snapshot itself are git-ignored (`.cache/`, `out/`).
-8. **The user's computer should not get clogged.** Stream or delete large files after use, and keep memory use modest so a full run works on a normal laptop and in GitHub Actions (7 GB RAM, about 14 GB disk).
+8. **Don't suggest emailing anyone.** Don't offer to draft or send emails to data providers, exchanges or companies (for example asking for permission or a licence). Work with the sources that are openly available, and if one is blocked, say so and suggest another source instead.
+9. **The user's computer should not get clogged.** Stream or delete large files after use, and keep memory use modest so a full run works on a normal laptop and in GitHub Actions (7 GB RAM, about 14 GB disk).
 
 ## Sources to evaluate (research done so far)
 
