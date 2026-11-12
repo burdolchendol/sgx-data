@@ -13,13 +13,14 @@ export function classifyPage(page) {
   const head = top(page, 7).replace(/\s+/g, ' ');
   // some PDFs space out heading letters ("C O N S O LI DATED  IN C O M E STATEM ENT"): match without spaces too
   const flat = head.replace(/\s+/g, '').toLowerCase();
-  if (/notes to the|summary|five-year|ten-year|highlights/i.test(head) || /notestothe|summary|five-year|ten-year/.test(flat)) return null;
+  // ("highlights" alone can be a side tab: "Financial & highlights" over Frasers' statements)
+  if (/notes to the|summary|five-year|ten-year|\b(financial|operating|performance|key|year) highlights|^highlights\b/i.test(head) || /notestothe|summary|five-year|ten-year/.test(flat)) return null;
   // side tabs ("Overview") can land inside a heading that wraps over two lines
   if (/statements?\b.{0,40}\bof cash flows|cash flow statements?/i.test(head) || /statements?of(\w{0,30})?cashflows|cashflowstatement/.test(flat)) return 'cf';
   if (/statements? of\b.{0,40}\bfinancial position|balance sheets?/i.test(head) || /statements?of(\w{0,30})?financialposition|balancesheets?(?!d)/.test(flat)) return 'bs';
   if (/comprehensive income/i.test(head) && !/income statements?|profit or loss/i.test(head.replace(/comprehensive income/ig, ''))) return null;
   if (/comprehensiveincome/.test(flat) && !/incomestatements?|profitorloss/.test(flat.replace(/comprehensiveincome/g, ''))) return null;
-  if (/income statements?|statements? of profit or loss|profit (or|and) loss (account|statement)|statements? of total return|statements? of income\b(?! and comprehensive)/i.test(head) || /incomestatements?|statements?ofprofitorloss|profit(or|and)loss(account|statement)|statements?oftotalreturn|statements?ofincome(?!andcomprehensive)/.test(flat)) return 'is';
+  if (/income statements?|statements? of profit (or|and) loss|profit (or|and) loss (account|statement)|statements? of total return|statements? of income\b(?! and comprehensive)/i.test(head) || /incomestatements?|statements?ofprofit(or|and)loss|profit(or|and)loss(account|statement)|statements?oftotalreturn|statements?ofincome(?!andcomprehensive)/.test(flat)) return 'is';
   return null;
 }
 
@@ -37,15 +38,20 @@ export function isCombinedIncomeStatement(page) {
 /** "For the financial year ended 31 March 2026" / "As at 31 December 2024" -> "2026-03-31". */
 export function periodEndFrom(page) {
   const head = top(page, 20);
-  let m = head.match(/(?:year ended|as at|as of|\bat)\s+(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
-    ?? head.replace(/\s+/g, '').match(/(?:yearended|asat|asof)(\d{1,2})([A-Za-z]+?)((?:19|20)\d{2})/i);
+  let m = head.match(/(?:year ended|as at|as of|\bat)\s+(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
+    ?? head.replace(/\s+/g, '').match(/(?:yearended|asat|asof)(\d{1,2})(?:st|nd|rd|th)?([A-Za-z]+?)((?:19|20)\d{2})/i);
   if (m && !MONTHS[m[2].toLowerCase()]) m = null;
+  // a bare date under the title: "STATEMENTS OF FINANCIAL POSITION / 31 December 2025" (Venture)
+  if (!m) {
+    const b = page.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 8).join('\n').match(/^(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})$/m);
+    if (b && MONTHS[b[2].toLowerCase()]) m = b;
+  }
   if (!m) {
     // US order: "As at December 31, 2023" (Sembcorp)
     const u = head.match(/(?:year ended|as at|as of|\bat)\s+([A-Za-z]+)\s+(\d{1,2}),?\s+((?:19|20)\d{2})/i);
     if (!u || !MONTHS[u[1].toLowerCase()]) {
       // "Year ended 30 September" over the year columns (ThaiBev): the latest column's year
-      const d = head.match(/(?:year ended|as at|as of)\s+(\d{1,2})\s+([A-Za-z]+)\b/i);
+      const d = head.match(/(?:year ended|as at|as of)\s+(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\b/i);
       const years = d && MONTHS[d[2].toLowerCase()] ? findHeader(page.split('\n'))?.years : null;
       if (!years?.length) return null;
       return `${Math.max(...years)}-${String(MONTHS[d[2].toLowerCase()]).padStart(2, '0')}-${String(Number(d[1])).padStart(2, '0')}`;
@@ -87,25 +93,25 @@ function groupFirst(page, headerLine) {
 
 // Field rules: statement, label pattern, and how to combine matches.
 const RULES = [
-  { field: 'revenue', st: 'is', re: /^(total )?(operating )?revenue$|^turnover$|^total income$|^total operating income$|^gross revenue$|^revenue from contracts with customers$/i },
+  { field: 'revenue', st: 'is', re: /^(total )?(operating )?revenue$|^turnover$|^sales$|^total income$|^total operating income$|^gross revenue$|^revenue from contracts with customers$/i },
   { field: 'netIncome', st: 'is', re: /^((net )?(profit|loss|profit\s*\/\s*\(loss\)|\(loss\)\s*\/\s*profit)( for the (year|period))?,?)?\s*(attributable to:?\s*)?(owners|shareholders|equity holders|ordinary shareholders|unitholders)( of the (company|bank|trust|reit|parent))?$|^(total return (for the (year|period) )?(attributable to:?\s*)?)?unitholders( of [\w&'’., -]+)?$/i, after: /attributable to/i },
   { field: 'epsDilutedCents', st: 'is', re: /^[-–]?\s*(basic and )?diluted( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
   { field: 'epsBasicCents', st: 'is', re: /^[-–]?\s*basic( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
   { field: 'totalAssets', st: 'bs', re: /^total assets$/i },
   { field: 'totalLiabilities', st: 'bs', re: /^total liabilities$/i },
   { field: 'currentAssets', st: 'bs', re: /^(total )?current assets$/i },
-  { field: 'currentLiabilities', st: 'bs', re: /^(total )?current liabilities$/i },
+  { field: 'currentLiabilities', st: 'bs', re: /^(total )?current liabilities$/i, abs: true },
   { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$|^(total )?shareholders['’]? funds$|^share capital (&|and) reserves$|^(total )?unitholders['’]? funds$/i },
   { field: 'totalEquity', st: 'bs', re: /^total (equity|deficit|capital deficiency)$/i },
   { field: 'nonControllingInterests', st: 'bs', re: /^(non[-–—]\s?controlling|minority) interests?$/i },
   { field: 'subsidiaryEquityInstruments', st: 'bs', re: /^(other equity instruments|perpetual (capital )?securities) issued by (a )?subsidiar(y|ies)$/i },
-  { field: 'perpetualSecurities', st: 'bs', re: /^perpetual (capital )?securities( holders['’]? funds)?$|^other equity instruments$/i },
-  { field: 'cash', st: 'bs', re: /^(cash and (cash equivalents|bank balances|short-term deposits)|bank balances,? (and )?(other liquid funds|deposits and cash|cash)|cash and fixed deposits)$/i },
+  { field: 'perpetualSecurities', st: 'bs', re: /^perpetual (capital )?securities( holders(['’]? funds)?)?$|^other equity instruments$/i },
+  { field: 'cash', st: 'bs', re: /^(cash and (cash equivalents|bank balances|short-term deposits)|bank balances,? (and )?(other liquid funds|deposits and cash|cash)|cash and fixed deposits|bank balances)$/i },
   { field: 'cashAtYearEnd', st: 'cf', re: /^cash and cash equivalents,? at (31 (december|march|june|september)|(the )?end of (the )?(financial )?(year|period))$/i },
   { field: 'goodwill', st: 'bs', re: /^goodwill$/i },
   { field: 'intangibles', st: 'bs', re: /^(other )?intangible assets( excluding goodwill)?$/i, combined: true },
-  { field: 'operatingCashFlow', st: 'cf', re: /^net cash (flows? )?(from|generated from|inflows? from|provided by|used in|(from|generated from|provided by|inflow from)\s*\/\s*\(?used in\)?|\(?used in\)?\s*\/\s*(generated from|from|provided by))( from)? operating activities$/i },
-  { field: 'capex', st: 'cf', re: /^capital expenditure$|^(payments? for |purchases? of |acquisitions? of |additions? to |payments? for (the )?(purchase|acquisition) of )(property, plant (and|&) equipment|property and equipment|properties and other fixed assets|fixed assets|vehicles, premises and equipment)( and (software|intangible assets))?$/i, abs: true },
+  { field: 'operatingCashFlow', st: 'cf', re: /^net cash (flows? )?(from|generated from|inflows? from|provided by|used in|(from|generated from|provided by|inflow from)\s*\/\s*\(?used in\)?|\(?used in\)?\s*\/\s*(generated from|from|provided by))( from)? operating activities$|^cash flows? (from|generated from|\(?used in\)?) operating activities$/i },
+  { field: 'capex', st: 'cf', re: /^capital expenditure$|^(payments? for |purchases? of |acquisitions? of |additions? to |payments? for (the )?(purchase|acquisition) of )(property, plant (and|&) equipment|property and equipment|properties and other fixed assets|fixed assets|tangible assets|vehicles, premises and equipment)( and (software|intangible assets))?$/i, abs: true },
   { field: 'dividendsPaid', st: 'cf', re: /^(final |interim |special )?(one-tier tax[- ]exempt )?dividends? paid (to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?|on ordinary shares|by the company)(,? net of scrip dividends?)?$|^dividends paid$|^distributions? paid to unitholders$|^distributions to unitholders$/i, sum: true, abs: true },
 ];
 
@@ -134,7 +140,7 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
   // a key line (highlights and review pages often have the first two). The income statement is the
   // first usable run; the balance sheet and cash-flow runs are the usable ones closest after it,
   // since the primary statements are printed together.
-  const KEY = { is: /revenue|total (operating )?income|profit before (income )?tax/i, bs: /^(total (assets|liabilities|equity)|net assets)$/i, cf: /operating activities/i };
+  const KEY = { is: /revenue|total (operating )?income|profit before (income )?tax/i, bs: /^(total (assets|liabilities|equity)|net assets|net current (assets|liabilities)|shareholders['’] funds)$/i, cf: /operating activities/i };
   const groupsOf = (idx) => {
     const groups = [];
     for (const i of idx) {
@@ -227,6 +233,8 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
           if (st === 'bs' && label === '' && section === 'current liabilities' && !currentClosed) take(c, 'currentLiabilities', units(), pi, 'Current liabilities (total)');
           // "Equity attributable to owners of the Company:" heading, its lines, then "Total" (Sembcorp)
           if (st === 'bs' && /^total$/i.test(label) && /^equity attributable to (the )?(owners|shareholders|equity holders)/i.test((row.heading ?? '').trim()) && cols[c].values.equity == null) take(c, 'equity', units(), pi, `${row.heading.trim().replace(/:$/, '')} (total)`);
+          // "Profit attributable to owners of the Company:" heading, its lines, then an unlabeled total (CDL)
+          if (st === 'is' && label === '' && /^(profit|\(loss\)\/profit|profit\/\(loss\)|loss) (for the year )?attributable to (the )?(owners|shareholders|equity holders) of the (company|parent)\b/i.test((row.heading ?? '').trim()) && cols[c].values.netIncome == null) take(c, 'netIncome', units(), pi, `${row.heading.trim().replace(/:$/, '')} (total)`);
           // "Operating revenue" heading, its lines, then an unlabeled total (SGX)
           if (st === 'is' && label === '' && /^(total )?(operating )?revenues?$/i.test((row.heading ?? '').trim())) take(c, 'revenue', units(), pi, `${row.heading.trim()} (total)`);
           // "Share capital ... reserves" then an unlabeled subtotal then "Non-controlling interests":
@@ -243,8 +251,10 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
             if (r.cents) {
               // EPS is printed in cents or in currency units; the label or its heading says which
               const ctx = `${label} ${row.heading ?? ''}`;
-              if (/cents/i.test(ctx)) v = centsToUnits(raw);
-              else if (/\((S?\$|US\$|SGD|USD|RM|RMB|HK\$)\)|dollars?/i.test(ctx)) v = raw;
+              // or a units line over the EPS block: "US¢  US¢" (Jardine C&C)
+              const above = pages[pi].split('\n').slice(Math.max(0, row.line - 6), row.line).join(' ');
+              if (row.cents || /cents/i.test(ctx) || (/(^|\s)(US|S)?¢(\s|$)/.test(above) && !/\$/.test(ctx))) v = centsToUnits(raw);
+              else if (/\((S?\$|US\$|SGD|USD|RM|RMB|HK\$)\)|dollars?/i.test(ctx) || /(^|\s)(US|S|HK)?\$(\s|$)/.test(above)) v = raw;
               else continue; // unknown unit: leave blank
             } else v = toUnits(raw, scale);
             if (r.abs) v = Math.abs(v);
@@ -375,7 +385,12 @@ export function dilutedSharesFromNotes(pages, fy) {
     const note = p.slice(p.search(/EARNINGS PER (ORDINARY )?(SHARE|UNIT)/i));
     // the share count can sit in its own small table above the profit table (DBS: "Number of shares
     // (millions)" or "('000)"), so read it block by block first, then the note as a whole
-    const blocks = [...note.split(/\n\s*\n/).filter((b) => /weighted average/i.test(b)), note];
+    // a note can hold several small tables, each under its own year header and units ("$'000" over the
+    // profit, "Number of shares" over the share count: CDL), so read each table on its own too
+    const lines = note.split('\n');
+    const starts = lines.map((l, i) => (findHeader([l]) ? i : -1)).filter((i) => i >= 0);
+    const tables = starts.map((st, j) => lines.slice(st, starts[j + 1] ?? lines.length).join('\n')).filter((b) => /weighted average/i.test(b));
+    const blocks = [...note.split(/\n\s*\n/).filter((b) => /weighted average/i.test(b)), ...tables, note];
     for (const text of blocks) {
       const { header, rows } = parseRows(text);
       if (!header) continue;
@@ -383,7 +398,7 @@ export function dilutedSharesFromNotes(pages, fy) {
       // "Weighted average ... for diluted EPS"; a weighted-average row under a heading about dilution;
       // or a bare "Diluted" row under a "Weighted average number of ordinary shares ('000)" heading
       const row = rows.find((r) => /weighted average.*dilut/i.test(r.label))
-        ?? rows.filter((r) => /weighted average/i.test(r.label) && /dilut/i.test(r.heading ?? '')).at(-1)
+        ?? rows.filter((r) => /weighted average/i.test(r.label) && !/basic/i.test(r.label) && /dilut/i.test(r.heading ?? '')).at(-1)
         ?? rows.find((r) => /^diluted$/i.test(r.label) && /weighted average/i.test(r.heading ?? ''))
         // only a basic count, and the note says diluted EPS is the same as basic
         ?? (/diluted earnings per (share|unit)\w*\s+(is|are)\s+(the\s+)?(same as|similar to|equal to|identical to)\s+(the\s+)?basic|no (potential(ly)? )?dilutive/i.test(p.replace(/\s+/g, ' '))
@@ -392,10 +407,20 @@ export function dilutedSharesFromNotes(pages, fy) {
       // units printed with the row or the nearest heading above it ("(’000)") beat the table's ("In $ millions")
       let near = null;
       for (const r of rows.slice(0, rows.indexOf(row) + 1)) near = detectUnits(`${r.label} ${r.heading ?? ''}`).scale ?? near;
-      const scale = near ?? header.units.scale
-        ?? (/no\.? of shares|number of shares/i.test(header.unitsText) ? 1 : null);
+      // the year header nearest above the row (a note can have one per table)
+      const tl = text.split('\n');
+      let own = header;
+      for (let j = row.line; j >= 0; j--) if (findHeader([tl[j]])) { own = findHeader(tl.slice(Math.max(0, j - 4), j + 14)) ?? header; break; }
+      const counts = (u) => /\b(no\.?|number) of\b/i.test(u) && /\bshares\b/i.test(u);
+      // a table of its own with no units, printing counts in full ("1,117,428,294"), is in shares (SATS)
+      const full = own !== header && !own.units.scale && row.figures.some((f) => Math.abs(f ?? 0) >= 1e7);
+      const scale = near ?? own.units.scale ?? (counts(own.unitsText) || full ? 1 : null)
+        ?? header.units.scale ?? (counts(header.unitsText) ? 1 : null);
       if (!scale) continue;
-      return { page: pi + 1, label: row.label, values: ci.map((i) => (i === -1 ? null : toUnits(row.figures[i], scale))) };
+      const values = ci.map((i) => (i === -1 ? null : toUnits(row.figures[i], scale)));
+      // more than 50 billion shares means the units were misread (no SGX company has that many)
+      if (values.some((x) => x != null && Math.abs(x) > 5e10)) continue;
+      return { page: pi + 1, label: row.label, values };
     }
   }
   return null;

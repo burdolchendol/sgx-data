@@ -9,7 +9,7 @@ const YEAR_ROW = /^\s*(?:[A-Za-z0-9$'’‘() ]{0,40}\s{2,})?(?:Notes?\s+)?((19|
 // note references printed between the label and the figures: "15", "B2", "C16", "4.1", "12(a)", "B3c",
 // or a list of them ("B1, B2", "21, 22")
 const ONE_REF = '[A-Z]?\\d{1,2}(\\.\\d{1,2})?[a-z]?(\\([a-z0-9]+\\))?';
-const NOTE_REF = new RegExp(`^${ONE_REF}(,\\s*${ONE_REF})*$`);
+const NOTE_REF = new RegExp(`^${ONE_REF}(\\s*[,&]\\s*${ONE_REF})*$`);
 const isNumToken = (t) => NUM_TOKEN.test(t);
 
 /** Split a layout line into cells: runs of text separated by 2+ spaces. */
@@ -20,12 +20,14 @@ export function cells(line) {
 // financial years printed as "FY2023/24" or "2023/24" read as the year they end in (2024), padded to
 // the same width so the column positions stay put (SIA)
 const SPLIT_YEAR = /(?<![\w/])(FY)?((?:19|20)\d{2})[/–-](\d{2})(?![\w/])/g;
+// and "FY23/24" (Mapletree Industrial Trust) as 2024
+const SHORT_FY = /(?<![\w/])FY(\d{2})[/–-](\d{2})(?![\w/])/g;
 function splitYears(line) {
   return line.replace(SPLIT_YEAR, (m, fy, start, end) => {
     const y = Number(start.slice(0, 2) + end) + (Number(end) < Number(start.slice(2)) ? 100 : 0);
     if (y !== Number(start) + 1) return m;
     return String(y).padStart(m.length);
-  });
+  }).replace(/(?<![\w/])FY((?:19|20)\d{2})(?![\w/])/g, '  $1').replace(SHORT_FY, (m, start, end) => ((Number(start) + 1) % 100 === Number(end) ? String(2000 + Number(end)).padStart(m.length) : m));
 }
 
 /**
@@ -55,7 +57,13 @@ export function findHeader(lines) {
     const near = `${below}  ${above}`;
     // right edge of each year label, to place figures in rows that leave some columns blank
     const colEnds = [...line.matchAll(/\b(19|20)\d{2}\b/g)].map((m) => m.index + 4);
-    return { lineIndex: i, years, units, unitsText: near.trim(), colEnds };
+    // Jardine-style statements print three columns under each year: "Underlying business performance",
+    // "Non-trading items" and "Total"; the Total column is the statutory figure
+    const sub = lines.slice(i + 1, i + 7).join(' ');
+    // and EPS notes print "Basic  Diluted" under each year (SIA): the second is the diluted figure
+    const split = (sub.match(/\btotal\b/gi) ?? []).length === years.length && /underlying/i.test(sub) && /\bnon-/i.test(sub) && /\btrading\b/i.test(sub) ? 3
+      : (sub.match(/\bbasic\s+diluted\b/gi) ?? []).length === years.length && years.length > 1 ? 2 : 1;
+    return { lineIndex: i, years, units, unitsText: near.trim(), colEnds, split };
   }
   return null;
 }
@@ -99,7 +107,9 @@ export function parseRows(pageText) {
   let pendingLabel = '';
   let heading = null; // last text-only line, e.g. "Attributable to:"
   for (let i = header.lineIndex + 1; i < lines.length; i++) {
-    const line = lines[i];
+    // EPS printed with its unit beside each figure: "69.4 cents   21.3 cents" (CDL)
+    const centsRow = /\d\s+cents\b.*\d\s+cents\b/i.test(lines[i]);
+    const line = centsRow ? lines[i].replace(/(\d)(\s+cents)\b/gi, (m, d, c) => d + ' '.repeat(c.length)) : lines[i];
     if (!line.trim()) { pendingLabel = ''; continue; }
     const parts = cells(line);
     // drop trailing text cells (side tabs such as "Overview" printed beside the table)
@@ -113,7 +123,8 @@ export function parseRows(pageText) {
       if (/^(current|non[-–—]\s?current)\s+(assets|liabilities)$/i.test(sec)) section = sec.toLowerCase().replace(/^non[-–—]\s?/, 'non-');
       else if (/^(share capital|capital and reserves|equity)\b/i.test(text) && (!/attributable/i.test(text) || /^equity attributable/i.test(text))) section = 'equity';
       pendingLabel = text;
-      if (text) heading = text;
+      // a label broken over lines ("Shareholders of the" / "Company") is not a heading
+      if (text && !/\b(of|the|and|to|in|for|from|on)$/i.test(text)) heading = text;
       continue;
     }
     // a cell like "Borrowings (unsecured) 29" keeps its note number inside the text cell
@@ -133,11 +144,19 @@ export function parseRows(pageText) {
     }
     let label = labelCells.join(' ').replace(/\s+\d{1,3}(\(\w\))?$/, '').trim();
     // continuation lines: "Weighted average number ... for calculation of" / " diluted earnings per share"
-    if (pendingLabel && (label === '' || /^[a-z(]/.test(label))) label = `${pendingLabel} ${label}`.trim();
-    const tokens = placed ?? nums.slice(-k);
+    if (pendingLabel && (label === '' || /^[a-z(]/.test(label) || /\b(of|the|and|to|in|for|from|on)$/i.test(pendingLabel))) label = `${pendingLabel} ${label}`.trim();
+    let tokens = placed ?? nums.slice(-k);
+    // three columns a year (underlying, non-trading, total): take each year's total;
+    // EPS rows print only underlying and total
+    if (header.split > 1 && !placed) {
+      // (a note number may come first: "Revenue   3   33,817   400   34,217 ...")
+      const n = header.split === 3 && nums.length >= 3 * k ? 3 : nums.length >= 2 * k ? 2 : 0;
+      const last = nums.slice(-n * k);
+      if (n) tokens = header.years.map((_, j) => last[n * j + n - 1]);
+    }
     const figures = tokens.map((t) => (t == null ? null : parseFigure(t)));
     const dashes = tokens.map((t) => t != null && /^[-—–−]$/.test(t));
-    rows.push({ label, figures: figures.map((f, j) => (f == null && dashes[j] ? 0 : f)), section, heading, line: i });
+    rows.push({ label, figures: figures.map((f, j) => (f == null && dashes[j] ? 0 : f)), section, heading, line: i, ...(centsRow ? { cents: true } : {}) });
     pendingLabel = '';
   }
   return { header, rows };

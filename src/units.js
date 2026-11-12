@@ -4,7 +4,9 @@ const SCALE_PATTERNS = [
   // order: most specific first
   { re: /\b(billions?|bn)\b/i, scale: 1e9 },
   { re: /\b(millions?|mil|mn)\b/i, scale: 1e6 },
-  { re: /['’‘]000|\bthousands?\b|\b000s\b/i, scale: 1e3 },
+  { re: /['’‘ʼ`]000|\bthousands?\b|\b000s\b/i, scale: 1e3 },
+  // figures printed in full: "(in Baht)" (ThaiBev FY2011)
+  { re: /\(in (baht|thb)\)/i, scale: 1 },
 ];
 
 // Currency codes and symbols as printed in table headers, e.g. "S$'000", "US$ million", "RMB'000".

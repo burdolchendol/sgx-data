@@ -190,3 +190,73 @@ test('net-assets balance sheet: total assets and liabilities from the segment no
   const bad = extractStatements([bs, note(2023, '9,999', '950')], { url: 'x' }).extractions;
   assert.equal(bad[0].values.totalAssets, undefined);
 });
+
+test('Jardine-style statements: three columns a year, "31st December", EPS in US$ or US¢, split labels', () => {
+  const row = (label, ...figs) => label.padEnd(36) + figs.map((f) => String(f).padStart(12)).join('');
+  const is = [
+    'Consolidated Profit and Loss Account',
+    'for the year ended 31st December 2025',
+    ''.padEnd(36) + '2025'.padStart(36) + '2024'.padStart(36),
+    row('', 'Underlying', 'Non-', '', 'Underlying', 'Non-'),
+    row('', 'business', 'trading', '', 'business', 'trading'),
+    row('', 'performance', 'items', 'Total', 'performance', 'items', 'Total'),
+    row('Note', 'US$m', 'US$m', 'US$m', 'US$m', 'US$m', 'US$m'),
+    row('Revenue                3', '33,817', '400', '34,217', '34,864', '915', '35,779'),
+    row('Profit before tax', '4,362', '(161)', '4,201', '4,470', '(3,039)', '1,431'),
+    'Attributable to:',
+    'Shareholders of the',
+    row('  Company            8&9', '1,681', '(572)', '1,109', '1,518', '(1,986)', '(468)'),
+    row('Non-controlling interests', '1,884', '298', '2,182', '2,126', '(1,103)', '1,023'),
+    row('', 'US$', '', 'US$', 'US$', '', 'US$'),
+    'Earnings per share',
+    row('– diluted               8', '5.72', '', '3.77', '5.23', '', '(1.61)'),
+  ].join('\n');
+  const [cur, prior] = extractStatements([is], { url: 'x' }).extractions;
+  assert.equal(cur.periodEnd, '2025-12-31');
+  assert.equal(cur.values.revenue, 34_217_000_000);
+  assert.equal(prior.values.revenue, 35_779_000_000);
+  assert.equal(cur.values.netIncome, 1_109_000_000);
+  assert.equal(prior.values.netIncome, -468_000_000);
+  assert.equal(cur.values.epsDiluted, 3.77);
+  // EPS printed with "cents" beside each figure
+  const cdl = [
+    'CONSOLIDATED STATEMENT OF PROFIT OR LOSS',
+    'Year ended 31 December 2025',
+    pad("$'000", 2025, 2024),
+    pad('Revenue', '3,587,000', '3,271,000'),
+    'Profit attributable to owners of the Company:',
+    pad('– Ordinary shareholders', '620,276', '190,849'),
+    pad('– Preference shareholders', '9,407', '10,467'),
+    pad('', '629,683', '201,316'),
+    'Earnings per share',
+    pad('– Diluted', '67.9 cents', '21.3 cents'),
+  ].join('\n');
+  const [c] = extractStatements([cdl], { url: 'x' }).extractions;
+  // the ordinary shareholders' line is taken (what EPS is based on)
+  assert.equal(c.values.netIncome, 620_276_000);
+  assert.equal(c.values.epsDiluted, 0.679);
+});
+
+test('REIT headers: "FY23/24" and "FY2026" columns, a bare date under the title, perpetual securities holders', () => {
+  const bs = [
+    'Statements of Financial Position',
+    '31 March 2024',
+    pad('', 'FY23/24', 'FY22/23'),
+    pad('', "S$'000", "S$'000"),
+    pad('Total assets', '13,812,335', '13,423,195'),
+    pad('Total liabilities', '6,327,903', '5,900,771'),
+    pad('Net assets', '7,484,432', '7,522,424'),
+    'Represented by:',
+    pad('Unitholders’ funds', '6,884,841', '6,926,920'),
+    pad('Perpetual securities holders', '581,545', '581,505'),
+    pad('Non-controlling interest', '18,046', '13,999'),
+  ].join('\n');
+  const [cur] = extractStatements([bs], { url: 'x' }).extractions;
+  assert.equal(cur.periodEnd, '2024-03-31');
+  const { values, failures } = runChecks(cur.values);
+  assert.deepEqual(failures, []);
+  assert.equal(values.totalAssets, 13_812_335_000);
+  assert.equal(cur.values.perpetualSecurities, 581_545_000);
+  const is = ['Consolidated Income Statement', 'for the financial year ended 31 March 2026', pad('', 'FY2026', 'FY2025'), pad('Note', '$ million', '$ million'), pad('Revenue', '6,345.5', '5,821.1')].join('\n');
+  assert.equal(extractStatements([is], { url: 'x' }).extractions[0].values.revenue, 6_345_500_000);
+});
