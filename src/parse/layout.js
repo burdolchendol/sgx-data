@@ -6,8 +6,10 @@ const NUM_TOKEN = /^(\(?[-−]?[\d,]+(\.\d+)?\)?|-|—|–|−)$/;
 // a year row may start with a caption: "In $ millions   Note   2025  2024", "Group  Note  2025  2024"
 // a restated comparative may carry a marker: "2024*", "2024(1)"
 const YEAR_ROW = /^\s*(?:[A-Za-z0-9$'’‘() ]{0,40}\s{2,})?(?:Notes?\s+)?((19|20)\d{2}(\*+|\(\w\))?\s+){1,7}(19|20)\d{2}(\*+|\(\w\))?\s*$/;
-// note references printed between the label and the figures: "15", "B2", "C16", "4.1", "12(a)"
-const NOTE_REF = /^([A-Z]?\d{1,2}(\.\d{1,2})?(\([a-z0-9]+\))?)$/;
+// note references printed between the label and the figures: "15", "B2", "C16", "4.1", "12(a)", "B3c",
+// or a list of them ("B1, B2", "21, 22")
+const ONE_REF = '[A-Z]?\\d{1,2}(\\.\\d{1,2})?[a-z]?(\\([a-z0-9]+\\))?';
+const NOTE_REF = new RegExp(`^${ONE_REF}(,\\s*${ONE_REF})*$`);
 const isNumToken = (t) => NUM_TOKEN.test(t);
 
 /** Split a layout line into cells: runs of text separated by 2+ spaces. */

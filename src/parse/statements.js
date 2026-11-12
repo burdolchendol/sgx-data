@@ -19,7 +19,7 @@ export function classifyPage(page) {
   if (/statements? of\b.{0,40}\bfinancial position|balance sheets?/i.test(head) || /statements?of(\w{0,30})?financialposition|balancesheets?(?!d)/.test(flat)) return 'bs';
   if (/comprehensive income/i.test(head) && !/income statements?|profit or loss/i.test(head.replace(/comprehensive income/ig, ''))) return null;
   if (/comprehensiveincome/.test(flat) && !/incomestatements?|profitorloss/.test(flat.replace(/comprehensiveincome/g, ''))) return null;
-  if (/income statements?|statements? of profit or loss|profit (or|and) loss (account|statement)|statements? of total return/i.test(head) || /incomestatements?|statements?ofprofitorloss|profit(or|and)loss(account|statement)|statements?oftotalreturn/.test(flat)) return 'is';
+  if (/income statements?|statements? of profit or loss|profit (or|and) loss (account|statement)|statements? of total return|statements? of income\b(?! and comprehensive)/i.test(head) || /incomestatements?|statements?ofprofitorloss|profit(or|and)loss(account|statement)|statements?oftotalreturn|statements?ofincome(?!andcomprehensive)/.test(flat)) return 'is';
   return null;
 }
 
@@ -37,9 +37,21 @@ export function isCombinedIncomeStatement(page) {
 /** "For the financial year ended 31 March 2026" / "As at 31 December 2024" -> "2026-03-31". */
 export function periodEndFrom(page) {
   const head = top(page, 20);
-  const m = head.match(/(?:year ended|as at|as of|\bat)\s+(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
+  let m = head.match(/(?:year ended|as at|as of|\bat)\s+(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
     ?? head.replace(/\s+/g, '').match(/(?:yearended|asat|asof)(\d{1,2})([A-Za-z]+?)((?:19|20)\d{2})/i);
-  if (!m) return null;
+  if (m && !MONTHS[m[2].toLowerCase()]) m = null;
+  if (!m) {
+    // US order: "As at December 31, 2023" (Sembcorp)
+    const u = head.match(/(?:year ended|as at|as of|\bat)\s+([A-Za-z]+)\s+(\d{1,2}),?\s+((?:19|20)\d{2})/i);
+    if (!u || !MONTHS[u[1].toLowerCase()]) {
+      // "Year ended 30 September" over the year columns (ThaiBev): the latest column's year
+      const d = head.match(/(?:year ended|as at|as of)\s+(\d{1,2})\s+([A-Za-z]+)\b/i);
+      const years = d && MONTHS[d[2].toLowerCase()] ? findHeader(page.split('\n'))?.years : null;
+      if (!years?.length) return null;
+      return `${Math.max(...years)}-${String(MONTHS[d[2].toLowerCase()]).padStart(2, '0')}-${String(Number(d[1])).padStart(2, '0')}`;
+    }
+    return `${u[3]}-${String(MONTHS[u[1].toLowerCase()]).padStart(2, '0')}-${String(Number(u[2])).padStart(2, '0')}`;
+  }
   const mo = MONTHS[m[2].toLowerCase()];
   if (!mo) return null;
   return `${m[3]}-${String(mo).padStart(2, '0')}-${String(Number(m[1])).padStart(2, '0')}`;
@@ -75,14 +87,14 @@ function groupFirst(page, headerLine) {
 
 // Field rules: statement, label pattern, and how to combine matches.
 const RULES = [
-  { field: 'revenue', st: 'is', re: /^(total )?(operating )?revenue$|^total income$|^total operating income$|^gross revenue$|^revenue from contracts with customers$/i },
+  { field: 'revenue', st: 'is', re: /^(total )?(operating )?revenue$|^turnover$|^total income$|^total operating income$|^gross revenue$|^revenue from contracts with customers$/i },
   { field: 'netIncome', st: 'is', re: /^((net )?(profit|loss|profit\s*\/\s*\(loss\)|\(loss\)\s*\/\s*profit)( for the (year|period))?,?)?\s*(attributable to:?\s*)?(owners|shareholders|equity holders|ordinary shareholders|unitholders)( of the (company|bank|trust|reit|parent))?$|^(total return (for the (year|period) )?(attributable to:?\s*)?)?unitholders( of [\w&'’., -]+)?$/i, after: /attributable to/i },
   { field: 'epsDilutedCents', st: 'is', re: /^[-–]?\s*(basic and )?diluted( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
   { field: 'epsBasicCents', st: 'is', re: /^[-–]?\s*basic( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
   { field: 'totalAssets', st: 'bs', re: /^total assets$/i },
   { field: 'totalLiabilities', st: 'bs', re: /^total liabilities$/i },
-  { field: 'currentAssets', st: 'bs', re: /^total current assets$/i },
-  { field: 'currentLiabilities', st: 'bs', re: /^total current liabilities$/i },
+  { field: 'currentAssets', st: 'bs', re: /^(total )?current assets$/i },
+  { field: 'currentLiabilities', st: 'bs', re: /^(total )?current liabilities$/i },
   { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$|^(total )?shareholders['’]? funds$|^share capital (&|and) reserves$|^(total )?unitholders['’]? funds$/i },
   { field: 'totalEquity', st: 'bs', re: /^total (equity|deficit|capital deficiency)$/i },
   { field: 'nonControllingInterests', st: 'bs', re: /^(non[-–—]\s?controlling|minority) interests?$/i },
@@ -213,6 +225,8 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
           // (the last one before "Net current assets" wins: it includes assets held for sale)
           if (st === 'bs' && label === '' && section === 'current assets' && !currentClosed) take(c, 'currentAssets', units(), pi, 'Current assets (total)');
           if (st === 'bs' && label === '' && section === 'current liabilities' && !currentClosed) take(c, 'currentLiabilities', units(), pi, 'Current liabilities (total)');
+          // "Equity attributable to owners of the Company:" heading, its lines, then "Total" (Sembcorp)
+          if (st === 'bs' && /^total$/i.test(label) && /^equity attributable to (the )?(owners|shareholders|equity holders)/i.test((row.heading ?? '').trim()) && cols[c].values.equity == null) take(c, 'equity', units(), pi, `${row.heading.trim().replace(/:$/, '')} (total)`);
           // "Operating revenue" heading, its lines, then an unlabeled total (SGX)
           if (st === 'is' && label === '' && /^(total )?(operating )?revenues?$/i.test((row.heading ?? '').trim())) take(c, 'revenue', units(), pi, `${row.heading.trim()} (total)`);
           // "Share capital ... reserves" then an unlabeled subtotal then "Non-controlling interests":
