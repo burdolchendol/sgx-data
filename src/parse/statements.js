@@ -37,7 +37,7 @@ export function isCombinedIncomeStatement(page) {
 /** "For the financial year ended 31 March 2026" / "As at 31 December 2024" -> "2026-03-31". */
 export function periodEndFrom(page) {
   const head = top(page, 20);
-  const m = head.match(/(?:year ended|as at|as of)\s+(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
+  const m = head.match(/(?:year ended|as at|as of|\bat)\s+(\d{1,2})\s+([A-Za-z]+)\s+((?:19|20)\d{2})/i)
     ?? head.replace(/\s+/g, '').match(/(?:yearended|asat|asof)(\d{1,2})([A-Za-z]+?)((?:19|20)\d{2})/i);
   if (!m) return null;
   const mo = MONTHS[m[2].toLowerCase()];
@@ -76,23 +76,24 @@ function groupFirst(page, headerLine) {
 // Field rules: statement, label pattern, and how to combine matches.
 const RULES = [
   { field: 'revenue', st: 'is', re: /^(total )?(operating )?revenue$|^total income$|^total operating income$|^gross revenue$|^revenue from contracts with customers$/i },
-  { field: 'netIncome', st: 'is', re: /^((net )?(profit|loss|profit\s*\/\s*\(loss\)|\(loss\)\s*\/\s*profit)( for the (year|period))?,?)?\s*(attributable to:?\s*)?(owners|shareholders|equity holders|ordinary shareholders|unitholders)( of the (company|bank|trust|reit))?$/i, after: /attributable to/i },
-  { field: 'epsDilutedCents', st: 'is', re: /^[-–]?\s*(basic and )?diluted( earnings per (share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
-  { field: 'epsBasicCents', st: 'is', re: /^[-–]?\s*basic( earnings per (share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
+  { field: 'netIncome', st: 'is', re: /^((net )?(profit|loss|profit\s*\/\s*\(loss\)|\(loss\)\s*\/\s*profit)( for the (year|period))?,?)?\s*(attributable to:?\s*)?(owners|shareholders|equity holders|ordinary shareholders|unitholders)( of the (company|bank|trust|reit|parent))?$/i, after: /attributable to/i },
+  { field: 'epsDilutedCents', st: 'is', re: /^[-–]?\s*(basic and )?diluted( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
+  { field: 'epsBasicCents', st: 'is', re: /^[-–]?\s*basic( earnings per (ordinary )?(share|unit))?(\s*\(([^)]*)\))?$/i, cents: true },
   { field: 'totalAssets', st: 'bs', re: /^total assets$/i },
   { field: 'totalLiabilities', st: 'bs', re: /^total liabilities$/i },
   { field: 'currentAssets', st: 'bs', re: /^total current assets$/i },
   { field: 'currentLiabilities', st: 'bs', re: /^total current liabilities$/i },
-  { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$/i },
+  { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$|^(total )?shareholders['’]? funds$/i },
   { field: 'totalEquity', st: 'bs', re: /^total (equity|deficit|capital deficiency)$/i },
-  { field: 'nonControllingInterests', st: 'bs', re: /^non-controlling interests?$/i },
+  { field: 'nonControllingInterests', st: 'bs', re: /^(non-controlling|minority) interests?$/i },
   { field: 'perpetualSecurities', st: 'bs', re: /^perpetual (capital )?securities$|^other equity instruments$/i },
   { field: 'cash', st: 'bs', re: /^(cash and (cash equivalents|bank balances|short-term deposits)|bank balances,? (and )?(other liquid funds|deposits and cash|cash))$/i },
+  { field: 'cashAtYearEnd', st: 'cf', re: /^cash and cash equivalents,? at (31 (december|march|june|september)|(the )?end of (the )?(financial )?(year|period))$/i },
   { field: 'goodwill', st: 'bs', re: /^goodwill$/i },
   { field: 'intangibles', st: 'bs', re: /^(other )?intangible assets( excluding goodwill)?$/i, combined: true },
   { field: 'operatingCashFlow', st: 'cf', re: /^net cash (flows? )?(from|generated from|inflows? from|provided by|used in|(from|generated from|provided by|inflow from)\s*\/\s*\(?used in\)?|\(?used in\)?\s*\/\s*(generated from|from|provided by))( from)? operating activities$/i },
   { field: 'capex', st: 'cf', re: /^(payments? for |purchases? of |acquisitions? of |additions? to |payments? for (the )?(purchase|acquisition) of )(property, plant (and|&) equipment|properties and other fixed assets|fixed assets|vehicles, premises and equipment)$/i, abs: true },
-  { field: 'dividendsPaid', st: 'cf', re: /^(final |interim |special )?(one-tier tax[- ]exempt )?dividends? paid (to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?|on ordinary shares|by the company)$/i, sum: true, abs: true },
+  { field: 'dividendsPaid', st: 'cf', re: /^(final |interim |special )?(one-tier tax[- ]exempt )?dividends? paid (to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?|on ordinary shares|by the company)(,? net of scrip dividends?)?$/i, sum: true, abs: true },
 ];
 
 const BORROWING = /borrowings|loans|bonds|notes|debt securities|debentures/i;
@@ -153,10 +154,12 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
   let unitsOk = true;
   const scales = new Set();
 
+  let seq = 0;
   const take = (col, field, value, page, label) => {
     if (value == null) return;
     cols[col].values[field] = value;
     cols[col].src[field] = { ...pageRef(page), label };
+    (cols[col].order ??= {})[field] ??= seq++;
   };
 
   for (const st of ['is', 'bs', 'cf']) {
@@ -191,8 +194,9 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
           // "Share capital ... reserves" then an unlabeled subtotal then "Non-controlling interests":
           // the subtotal is equity attributable to owners
           if (st === 'bs' && label === '' && section === 'equity' && cols[c].values.equity == null && !cols[c].values.perpetualSecurities && /^non-controlling interests?$/i.test(nextLabel)) take(c, 'equity', units(), pi, 'Equity attributable to owners of the Company (subtotal)');
+          const ruleLabel = label.replace(/\s*\((\d{1,2}|[a-z]|note \d+)\)$/i, '');
           for (const r of RULES) {
-            if (r.st !== st || !r.re.test(label)) continue;
+            if (r.st !== st || !r.re.test(ruleLabel)) continue;
             if (r.field === 'netIncome' && !afterAttributable && !/attributable/i.test(label)) continue;
             if (r.field === 'cash' && section && section !== 'current assets') continue;
             let v;
@@ -234,6 +238,11 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
     else if (v.epsBasicCents != null) { v.epsDiluted = v.epsBasicCents; col.src.epsDilutedCents = col.src.epsBasicCents; }
     if (col.src.epsDilutedCents) col.src.epsDiluted = col.src.epsDilutedCents;
     delete v.epsDilutedCents; delete v.epsBasicCents; delete col.src.epsDilutedCents; delete col.src.epsBasicCents;
+    // perpetual securities printed above the owners' equity subtotal ("Shareholders' funds") are part of it
+    if (v.perpetualSecurities != null && v.equity != null && col.order?.perpetualSecurities < col.order?.equity) delete v.perpetualSecurities;
+    // banks show no "cash and cash equivalents" line on the balance sheet: take the cash-flow statement's
+    if (v.cash == null && v.cashAtYearEnd != null) { v.cash = v.cashAtYearEnd; col.src.cash = col.src.cashAtYearEnd; }
+    delete v.cashAtYearEnd; delete col.src.cashAtYearEnd;
     // no non-controlling interests line: all equity belongs to the owners, so total equity is the figure
     if (v.equity == null && v.totalEquity != null && !('nonControllingInterests' in v)) { v.equity = v.totalEquity; col.src.equity = col.src.totalEquity; }
     delete v.totalEquity; delete col.src.totalEquity;
@@ -273,26 +282,32 @@ export function presentationCurrency(pages) {
 export function dilutedSharesFromNotes(pages, fy) {
   for (let pi = 0; pi < pages.length; pi++) {
     const p = pages[pi];
-    if (!/EARNINGS PER (SHARE|UNIT)/i.test(p) || !/weighted average/i.test(p)) continue;
-    const { header, rows } = parseRows(p.slice(p.search(/EARNINGS PER (SHARE|UNIT)/i)));
-    if (!header) continue;
-    const ci = [header.years.indexOf(fy), header.years.indexOf(fy - 1)];
-    // "Weighted average ... for diluted EPS"; a weighted-average row under a heading about dilution;
-    // or a bare "Diluted" row under a "Weighted average number of ordinary shares ('000)" heading
-    const row = rows.find((r) => /weighted average.*dilut/i.test(r.label))
-      ?? rows.filter((r) => /weighted average/i.test(r.label) && /dilut/i.test(r.heading ?? '')).at(-1)
-      ?? rows.find((r) => /^diluted$/i.test(r.label) && /weighted average/i.test(r.heading ?? ''))
-      // only a basic count, and the note says diluted EPS is the same as basic
-      ?? (/diluted earnings per (share|unit)\w*\s+(is|are)\s+(the\s+)?(same as|similar to|equal to|identical to)\s+(the\s+)?basic|no (potential(ly)? )?dilutive/i.test(p.replace(/\s+/g, ' '))
-        ? rows.find((r) => /weighted average/i.test(r.label) && /basic/i.test(r.label)) : undefined);
-    if (!row || ci[0] === -1) continue;
-    // units printed with the row or the nearest heading above it ("(’000)") beat the table's ("In $ millions")
-    let near = null;
-    for (const r of rows.slice(0, rows.indexOf(row) + 1)) near = detectUnits(`${r.label} ${r.heading ?? ''}`).scale ?? near;
-    const scale = near ?? header.units.scale
-      ?? (/no\.? of shares|number of shares/i.test(header.unitsText) ? 1 : null);
-    if (!scale) continue;
-    return { page: pi + 1, label: row.label, values: ci.map((i) => (i === -1 ? null : toUnits(row.figures[i], scale))) };
+    if (!/EARNINGS PER (ORDINARY )?(SHARE|UNIT)/i.test(p) || !/weighted average/i.test(p)) continue;
+    const note = p.slice(p.search(/EARNINGS PER (ORDINARY )?(SHARE|UNIT)/i));
+    // the share count can sit in its own small table above the profit table (DBS: "Number of shares
+    // (millions)" or "('000)"), so read it block by block first, then the note as a whole
+    const blocks = [...note.split(/\n\s*\n/).filter((b) => /weighted average/i.test(b)), note];
+    for (const text of blocks) {
+      const { header, rows } = parseRows(text);
+      if (!header) continue;
+      const ci = [header.years.indexOf(fy), header.years.indexOf(fy - 1)];
+      // "Weighted average ... for diluted EPS"; a weighted-average row under a heading about dilution;
+      // or a bare "Diluted" row under a "Weighted average number of ordinary shares ('000)" heading
+      const row = rows.find((r) => /weighted average.*dilut/i.test(r.label))
+        ?? rows.filter((r) => /weighted average/i.test(r.label) && /dilut/i.test(r.heading ?? '')).at(-1)
+        ?? rows.find((r) => /^diluted$/i.test(r.label) && /weighted average/i.test(r.heading ?? ''))
+        // only a basic count, and the note says diluted EPS is the same as basic
+        ?? (/diluted earnings per (share|unit)\w*\s+(is|are)\s+(the\s+)?(same as|similar to|equal to|identical to)\s+(the\s+)?basic|no (potential(ly)? )?dilutive/i.test(p.replace(/\s+/g, ' '))
+          ? rows.find((r) => /weighted average/i.test(r.label) && /basic/i.test(r.label)) : undefined);
+      if (!row || ci[0] === -1) continue;
+      // units printed with the row or the nearest heading above it ("(’000)") beat the table's ("In $ millions")
+      let near = null;
+      for (const r of rows.slice(0, rows.indexOf(row) + 1)) near = detectUnits(`${r.label} ${r.heading ?? ''}`).scale ?? near;
+      const scale = near ?? header.units.scale
+        ?? (/no\.? of shares|number of shares/i.test(header.unitsText) ? 1 : null);
+      if (!scale) continue;
+      return { page: pi + 1, label: row.label, values: ci.map((i) => (i === -1 ? null : toUnits(row.figures[i], scale))) };
+    }
   }
   return null;
 }

@@ -5,7 +5,7 @@ import { parseFigure, detectUnits } from '../units.js';
 const NUM_TOKEN = /^(\(?[-−]?[\d,]+(\.\d+)?\)?|-|—|–|−)$/;
 // a year row may start with a caption: "In $ millions   Note   2025  2024", "Group  Note  2025  2024"
 // a restated comparative may carry a marker: "2024*", "2024(1)"
-const YEAR_ROW = /^\s*(?:[A-Za-z$'’‘ ]{0,40}\s{2,})?(?:Notes?\s+)?((19|20)\d{2}(\*+|\(\w\))?\s+){1,7}(19|20)\d{2}(\*+|\(\w\))?\s*$/;
+const YEAR_ROW = /^\s*(?:[A-Za-z0-9$'’‘() ]{0,40}\s{2,})?(?:Notes?\s+)?((19|20)\d{2}(\*+|\(\w\))?\s+){1,7}(19|20)\d{2}(\*+|\(\w\))?\s*$/;
 // note references printed between the label and the figures: "15", "B2", "C16", "4.1", "12(a)"
 const NOTE_REF = /^([A-Z]?\d{1,2}(\.\d{1,2})?(\([a-z0-9]+\))?)$/;
 const isNumToken = (t) => NUM_TOKEN.test(t);

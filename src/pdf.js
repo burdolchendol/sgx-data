@@ -14,11 +14,17 @@ async function withTempPdf(buffer, fn) {
   try { await writeFile(file, buffer); return await fn(file); } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
+// some PDFs print "ﬁ"/"ﬂ" ligatures ("Cash ﬂows"): spell them out so headings and labels match
+const LIG = { 'ﬀ': 'ff', 'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬃ': 'ffi', 'ﬄ': 'ffl', 'ﬅ': 'st', 'ﬆ': 'st' };
+// some PDFTron-made reports map the fi/fl ligatures to "ȴ"/"ȵ" (DBS 2022: "Cash ȵows", "ȴnancing")
+const ODD = { 'ȴ': 'fi', 'ȵ': 'fl' };
+export const ligatures = (text) => text.replace(/[ﬀ-ﬆ]/g, (c) => LIG[c] ?? c).replace(/(?<=[A-Za-z ]|^)[ȴȵ](?=[a-z])/gm, (c) => ODD[c]);
+
 /** Returns an array of page texts (index 0 = page 1). */
 export function pdfPages(buffer) {
   return withTempPdf(buffer, async (file) => {
     const { stdout } = await run('pdftotext', ['-layout', '-enc', 'UTF-8', file, '-'], { maxBuffer: 256 * 1024 * 1024 });
-    const pages = stdout.split('\f');
+    const pages = ligatures(stdout).split('\f');
     if (pages.length && pages[pages.length - 1].trim() === '') pages.pop();
     return pages;
   });
@@ -45,7 +51,7 @@ export function pdfPrintedPages(buffer, { split = null } = {}) {
     const sizes = [...info.matchAll(/^Page\s+\d+\s+size:\s+([\d.]+) x ([\d.]+)/gm)].map((m) => [Number(m[1]), Number(m[2])]);
     const text = async (extra) => {
       const { stdout } = await run('pdftotext', ['-layout', '-enc', 'UTF-8', ...extra, file, '-'], { maxBuffer: 256 * 1024 * 1024 });
-      const p = stdout.split('\f');
+      const p = ligatures(stdout).split('\f');
       if (p.length && p[p.length - 1].trim() === '') p.pop();
       return p;
     };
