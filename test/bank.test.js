@@ -160,3 +160,33 @@ test('REIT statement of total return; net current assets closes the current sect
   assert.equal(v.equity, 9_800_000);
   assert.equal(v.perpetualSecurities, 300_000);
 });
+
+test('net-assets balance sheet: total assets and liabilities from the segment note, when they agree', () => {
+  const bs = [
+    'Statements of Financial Position',
+    'As at 31 December 2023',
+    pad("$'000", 2023, 2022),
+    'Current assets',
+    pad('Cash and cash equivalents', '3,600', '3,400'),
+    pad('', '3,900', '3,600'),
+    pad('Net current assets', '3,100', '3,000'),
+    pad('Share capital', '5,500', '5,500'),
+    pad('Retained earnings', '2,700', '2,500'),
+    pad('Total equity', '8,200', '8,000'),
+  ].join('\n');
+  const note = (year, ta, tl) => [
+    'Notes to the financial statements',
+    '29. Segment information',
+    `      ${year}                     $'000`,
+    pad('Segment assets', '9,000'),
+    pad('Consolidated total assets', ta),
+    pad('Consolidated total liabilities', tl),
+  ].join('\n');
+  const good = extractStatements([bs, note(2023, '9,150', '950'), note(2022, '8,800', '800')], { url: 'x' }).extractions;
+  assert.equal(good[0].values.totalAssets, 9_150_000);
+  assert.equal(good[0].values.totalLiabilities, 950_000);
+  assert.equal(good[1].values.totalAssets, 8_800_000);
+  // figures that don't add up to total equity are left blank
+  const bad = extractStatements([bs, note(2023, '9,999', '950')], { url: 'x' }).extractions;
+  assert.equal(bad[0].values.totalAssets, undefined);
+});

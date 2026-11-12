@@ -1,7 +1,7 @@
 // Reads the group (consolidated) primary statements out of an annual report's text pages
 // and returns one extraction per fiscal year column (the current year and the comparative).
 import { parseRows, findHeader } from './layout.js';
-import { toUnits, centsToUnits, detectUnits } from '../units.js';
+import { toUnits, centsToUnits, detectUnits, parseFigure } from '../units.js';
 
 const MONTHS = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8,
   september: 9, october: 10, november: 11, december: 12 };
@@ -257,6 +257,10 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
   // the primary statements of one report share their units; if they don't, a unit was misread
   if (scales.size > 1) { unitsOk = false; notes.push(`statements disagree on units (${[...scales].join(', ')})`); }
 
+  // balance sheets in the net-assets format (SIA, Genting Singapore) print no total assets or total
+  // liabilities, but the segment note does. Used only when total assets minus total liabilities there
+  // equals the balance sheet's total equity.
+  const segment = scales.size === 1 ? segmentTotals(pages, [fy, fy - 1]) : null;
   const extractions = cols.map((col) => {
     const v = col.values;
     // diluted EPS, else basic (AGENTS.md)
@@ -272,6 +276,16 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
     // banks show no "cash and cash equivalents" line on the balance sheet: take the cash-flow statement's
     if (v.cash == null && v.cashAtYearEnd != null) { v.cash = v.cashAtYearEnd; col.src.cash = col.src.cashAtYearEnd; }
     delete v.cashAtYearEnd; delete col.src.cashAtYearEnd;
+    const seg = segment?.[cols.indexOf(col)];
+    if (seg && v.totalAssets == null && v.totalLiabilities == null && v.totalEquity != null) {
+      const [scale] = scales;
+      const ta = toUnits(seg.ta.value, scale);
+      const tl = toUnits(seg.tl.value, scale);
+      if (Math.abs(ta - tl - v.totalEquity) <= Math.max(1, Math.abs(v.totalEquity) * 0.001)) {
+        v.totalAssets = ta; col.src.totalAssets = { ...pageRef(seg.ta.page), label: seg.ta.label };
+        v.totalLiabilities = tl; col.src.totalLiabilities = { ...pageRef(seg.tl.page), label: seg.tl.label };
+      }
+    }
     // no non-controlling interests line: all equity belongs to the owners, so total equity is the figure
     if (v.equity == null && v.totalEquity != null && !('nonControllingInterests' in v) && !('perpetualSecurities' in v)) { v.equity = v.totalEquity; col.src.equity = col.src.totalEquity; }
     delete v.totalEquity; delete col.src.totalEquity;
@@ -304,6 +318,36 @@ export function presentationCurrency(pages) {
     if (m) return map.find(([r]) => r.test(m[1]))?.[1] ?? null;
   }
   return null;
+}
+
+/**
+ * Group total assets and total liabilities from the segment note: the last figure on a "Total assets" /
+ * "Consolidated total assets" line, in the block headed by the year ("2023", "AS AT 31 MARCH 2024").
+ * Returns one entry per year asked for: { ta: { value, page, label }, tl: {...} } or null.
+ */
+export function segmentTotals(pages, years) {
+  const out = years.map(() => ({}));
+  const LINE = /^\s*((consolidated )?total (assets|liabilities))\s{2,}(.*\S)\s*$/i;
+  const YEAR = /^\s*(?:(?:group\s+)?|as at \d{1,2} [a-z]+ )((?:19|20)\d{2})\b/i;
+  pages.forEach((p, pi) => {
+    if (!/segment/i.test(p)) return;
+    const lines = p.split('\n');
+    let year = null;
+    for (const line of lines) {
+      const y = line.match(YEAR);
+      if (y && !LINE.test(line)) { year = Number(y[1]); continue; }
+      const m = line.match(LINE);
+      if (!m || year == null) continue;
+      const i = years.indexOf(year);
+      if (i === -1) continue;
+      const nums = m[4].split(/\s{2,}/);
+      if (!nums.every((t) => /^\(?[\d,]+(\.\d+)?\)?$|^[-–]$/.test(t))) continue; // another table beside it
+      const value = parseFigure(nums.at(-1));
+      const key = /assets/i.test(m[3]) ? 'ta' : 'tl';
+      if (value != null && value > 0 && !out[i][key]) out[i][key] = { value, page: pi, label: `${m[1]} (segment note)` };
+    }
+  });
+  return out.map((o) => (o.ta && o.tl ? o : null));
 }
 
 /**
