@@ -83,9 +83,9 @@ const RULES = [
   { field: 'totalLiabilities', st: 'bs', re: /^total liabilities$/i },
   { field: 'currentAssets', st: 'bs', re: /^total current assets$/i },
   { field: 'currentLiabilities', st: 'bs', re: /^total current liabilities$/i },
-  { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$|^(total )?shareholders['’]? funds$/i },
+  { field: 'equity', st: 'bs', re: /^(total )?equity attributable to (owners|shareholders|equity holders|ordinary shareholders)( of the (company|bank))?$|^(total )?shareholders['’]? funds$|^share capital (&|and) reserves$/i },
   { field: 'totalEquity', st: 'bs', re: /^total (equity|deficit|capital deficiency)$/i },
-  { field: 'nonControllingInterests', st: 'bs', re: /^(non-controlling|minority) interests?$/i },
+  { field: 'nonControllingInterests', st: 'bs', re: /^(non[-–—]\s?controlling|minority) interests?$/i },
   { field: 'perpetualSecurities', st: 'bs', re: /^perpetual (capital )?securities$|^other equity instruments$/i },
   { field: 'cash', st: 'bs', re: /^(cash and (cash equivalents|bank balances|short-term deposits)|bank balances,? (and )?(other liquid funds|deposits and cash|cash))$/i },
   { field: 'cashAtYearEnd', st: 'cf', re: /^cash and cash equivalents,? at (31 (december|march|june|september)|(the )?end of (the )?(financial )?(year|period))$/i },
@@ -193,7 +193,7 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
           if (st === 'bs' && label === '' && section === 'current liabilities') take(c, 'currentLiabilities', units(), pi, 'Current liabilities (total)');
           // "Share capital ... reserves" then an unlabeled subtotal then "Non-controlling interests":
           // the subtotal is equity attributable to owners
-          if (st === 'bs' && label === '' && section === 'equity' && cols[c].values.equity == null && !cols[c].values.perpetualSecurities && /^non-controlling interests?$/i.test(nextLabel)) take(c, 'equity', units(), pi, 'Equity attributable to owners of the Company (subtotal)');
+          if (st === 'bs' && label === '' && section === 'equity' && cols[c].values.equity == null && !cols[c].values.perpetualSecurities && /^non[-–—]\s?controlling interests?$/i.test(nextLabel)) take(c, 'equity', units(), pi, 'Equity attributable to owners of the Company (subtotal)');
           const ruleLabel = label.replace(/\s*\((\d{1,2}|[a-z]|note \d+)\)$/i, '');
           for (const r of RULES) {
             if (r.st !== st || !r.re.test(ruleLabel)) continue;
@@ -244,7 +244,7 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
     if (v.cash == null && v.cashAtYearEnd != null) { v.cash = v.cashAtYearEnd; col.src.cash = col.src.cashAtYearEnd; }
     delete v.cashAtYearEnd; delete col.src.cashAtYearEnd;
     // no non-controlling interests line: all equity belongs to the owners, so total equity is the figure
-    if (v.equity == null && v.totalEquity != null && !('nonControllingInterests' in v)) { v.equity = v.totalEquity; col.src.equity = col.src.totalEquity; }
+    if (v.equity == null && v.totalEquity != null && !('nonControllingInterests' in v) && !('perpetualSecurities' in v)) { v.equity = v.totalEquity; col.src.equity = col.src.totalEquity; }
     delete v.totalEquity; delete col.src.totalEquity;
     // a single "intangible assets" line with no separate goodwill line is the combined figure
     if (v.intangibles != null && v.goodwill == null && /^intangible assets$/i.test(col.src.intangibles?.label ?? '')) {

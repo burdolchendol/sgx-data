@@ -86,3 +86,23 @@ test('ligatures are spelled out', () => {
   assert.equal(ligatures('Cash ﬂows from ﬁnancing'), 'Cash flows from financing');
   assert.equal(ligatures('Cash ȵows from ȴnancing'), 'Cash flows from financing');
 });
+
+test('"Share capital & reserves" is owners\' equity, with an en dash in "Non–controlling interests"', () => {
+  const page = [
+    'Balance Sheets',
+    'as at 31 December 2025',
+    pad("$'000", 2025, 2024),
+    pad('Total assets', '30,000', '29,000'),
+    pad('Total liabilities', '18,000', '17,000'),
+    pad('Share capital', '1,300', '1,300'),
+    pad('Reserves', '9,300', '9,500'),
+    pad('Share capital & reserves', '10,600', '10,800'),
+    pad('Perpetual securities', '400', '400'),
+    pad('Non–controlling interests', '1,000', '800'),
+    pad('Total equity', '12,000', '12,000'),
+  ].join('\n');
+  const [cur] = extractStatements([page], { url: 'x' }).extractions;
+  assert.equal(cur.values.equity, 10_600_000);
+  assert.equal(cur.values.nonControllingInterests, 1_000_000);
+  assert.equal(cur.values.perpetualSecurities, 400_000);
+});
