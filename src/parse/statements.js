@@ -15,6 +15,8 @@ export function classifyPage(page) {
   const flat = head.replace(/\s+/g, '').toLowerCase();
   // ("highlights" alone can be a side tab: "Financial & highlights" over Frasers' statements)
   if (/notes to the|summary|five-year|ten-year|\b(financial|operating|performance|key|year) highlights|^highlights\b/i.test(head) || /notestothe|summary|five-year|ten-year/.test(flat)) return null;
+  // a business trust's report also prints its trustee-manager's own accounts ("NetLink NBN Management Pte. Ltd.")
+  if (/\bmanage(ment|r)\b[\w\s.()-]{0,40}\bpte\.?\s*l(td|imited)\b/i.test(head)) return null;
   // side tabs ("Overview") can land inside a heading that wraps over two lines
   if (/statements?\b.{0,40}\bof cash flows|cash flow statements?/i.test(head) || /statements?of(\w{0,30})?cashflows|cashflowstatement/.test(flat)) return 'cf';
   if (/statements? of\b.{0,40}\bfinancial position|balance sheets?/i.test(head) || /statements?of(\w{0,30})?financialposition|balancesheets?(?!d)/.test(flat)) return 'bs';
@@ -230,7 +232,7 @@ export function extractStatements(pages, { url, pageRef = (i) => ({ url, page: i
           // section subtotals printed without a label
           // (the last one before "Net current assets" wins: it includes assets held for sale)
           if (st === 'bs' && label === '' && section === 'current assets' && !currentClosed) take(c, 'currentAssets', units(), pi, 'Current assets (total)');
-          if (st === 'bs' && label === '' && section === 'current liabilities' && !currentClosed) take(c, 'currentLiabilities', units(), pi, 'Current liabilities (total)');
+          if (st === 'bs' && label === '' && section === 'current liabilities' && !currentClosed) take(c, 'currentLiabilities', units() == null ? null : Math.abs(units()), pi, 'Current liabilities (total)');
           // "Equity attributable to owners of the Company:" heading, its lines, then "Total" (Sembcorp)
           if (st === 'bs' && /^total$/i.test(label) && /^equity attributable to (the )?(owners|shareholders|equity holders)/i.test((row.heading ?? '').trim()) && cols[c].values.equity == null) take(c, 'equity', units(), pi, `${row.heading.trim().replace(/:$/, '')} (total)`);
           // "Profit attributable to owners of the Company:" heading, its lines, then an unlabeled total (CDL)

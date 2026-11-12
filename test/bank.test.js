@@ -260,3 +260,17 @@ test('REIT headers: "FY23/24" and "FY2026" columns, a bare date under the title,
   const is = ['Consolidated Income Statement', 'for the financial year ended 31 March 2026', pad('', 'FY2026', 'FY2025'), pad('Note', '$ million', '$ million'), pad('Revenue', '6,345.5', '5,821.1')].join('\n');
   assert.equal(extractStatements([is], { url: 'x' }).extractions[0].values.revenue, 6_345_500_000);
 });
+
+test('figures in full dollars ("$  $" under the years); a trustee-manager\'s own accounts are skipped', () => {
+  const is = [
+    'Consolidated Statement of Profit or Loss',
+    'For the year ended 31 December 2023',
+    pad('', 2023, 2022),
+    pad('Note', '$', '$'),
+    pad('Revenue', '42,512,568', '20,307,856'),
+    pad('Profit for the year', '7,008,268', '5,349,159'),
+  ].join('\n');
+  assert.equal(extractStatements([is], { url: 'x' }).extractions[0].values.revenue, 42_512_568);
+  const tm = ['NETLINK NBN MANAGEMENT PTE. LTD.', 'Statement of Profit or Loss', 'For the Financial Year Ended 31 March 2020', pad('', 2020, 2019), pad('Note', '$', '$'), pad('Revenue', '1,000', '900'), pad('Profit for the year', '100', '90')].join('\n');
+  assert.equal(extractStatements([tm], { url: 'x' }).extractions.length, 0);
+});

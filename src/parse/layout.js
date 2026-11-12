@@ -54,6 +54,9 @@ export function findHeader(lines) {
     const ub = detectUnits(below.replace(/\bNotes?\b/gi, ''));
     const ua = detectUnits(above.replace(/\bNotes?\b/gi, ''));
     const units = { currency: ub.currency ?? ua.currency, scale: ub.scale ?? ua.scale };
+    // figures in full dollars: a line of bare "$" under the years, one per column (iFAST)
+    const unitRow = nonEmpty(i + 1, 1)[0] ?? '';
+    if (units.scale == null && /^\s*(notes?\s+)?((US|S)?\$\s+)*(US|S)?\$\s*$/i.test(unitRow) && (unitRow.match(/\$/g) ?? []).length >= years.length) units.scale = 1;
     const near = `${below}  ${above}`;
     // right edge of each year label, to place figures in rows that leave some columns blank
     const colEnds = [...line.matchAll(/\b(19|20)\d{2}\b/g)].map((m) => m.index + 4);
