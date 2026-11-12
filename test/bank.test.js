@@ -106,3 +106,57 @@ test('"Share capital & reserves" is owners\' equity, with an en dash in "Non–c
   assert.equal(cur.values.nonControllingInterests, 1_000_000);
   assert.equal(cur.values.perpetualSecurities, 400_000);
 });
+
+test('split financial years ("FY2023/24", "2012-13") read as the year they end in', async () => {
+  const { findHeader } = await import('../src/parse/layout.js');
+  assert.deepEqual(findHeader(['   (in $ million)', pad('', 'FY2023/24', 'FY2022/23')]).years, [2024, 2023]);
+  assert.deepEqual(findHeader(['   $ million', pad('Notes', '2012-13', '2011-12')]).years, [2013, 2012]);
+  assert.deepEqual(findHeader(["   $'000", pad('Note', '31/12/2023', '31/12/2022')]).years, [2023, 2022]);
+});
+
+test('REIT statement of total return; net current assets closes the current sections', () => {
+  const str = [
+    'Consolidated Statement of Total Return',
+    'Year ended 31 December 2024',
+    pad("$'000", 2024, 2023),
+    pad('Gross revenue', '1,500', '1,400'),
+    pad('Total return for the year', '760', '170'),
+    'Attributable to:',
+    pad('Unitholders of Example REIT', '750', '160'),
+    pad('Perpetual securities holders', '10', '10'),
+    'Earnings per Unit (cents)',
+    pad('– Basic and diluted', '17.00', '3.60'),
+  ].join('\n');
+  const bs = [
+    'Statement of Financial Position',
+    'As at 31 December 2024',
+    pad("$'000", 2024, 2023),
+    'Current assets',
+    pad('Cash and fixed deposits', '100', '90'),
+    pad('', '300', '280'),
+    pad('Assets held for sale', '50', '0'),
+    pad('', '350', '280'),
+    'Current liabilities',
+    pad('Trade and other payables', '200', '210'),
+    pad('', '200', '210'),
+    pad('Net current assets', '150', '70'),
+    'Non–current liabilities',
+    pad('Term loans', '4,000', '4,100'),
+    pad('', '4,000', '4,100'),
+    pad('Total assets', '18,000', '18,100'),
+    pad('Total liabilities', '7,900', '8,000'),
+    pad("Unitholders’ funds", '9,800', '9,800'),
+    pad('Perpetual securities holders’ funds', '300', '300'),
+  ].join('\n');
+  const [cur] = extractStatements([str, bs], { url: 'x' }).extractions;
+  const v = cur.values;
+  assert.equal(v.revenue, 1_500_000);
+  assert.equal(v.netIncome, 750_000);
+  assert.equal(v.epsDiluted, 0.17);
+  assert.equal(v.currentAssets, 350_000); // includes assets held for sale
+  assert.equal(v.currentLiabilities, 200_000); // not the non-current subtotal below it
+  assert.equal(v.longTermDebt, 4_000_000);
+  assert.equal(v.cash, 100_000);
+  assert.equal(v.equity, 9_800_000);
+  assert.equal(v.perpetualSecurities, 300_000);
+});

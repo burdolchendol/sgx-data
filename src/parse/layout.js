@@ -15,6 +15,17 @@ export function cells(line) {
   return line.trim().split(/\s{2,}/).filter(Boolean);
 }
 
+// financial years printed as "FY2023/24" or "2023/24" read as the year they end in (2024), padded to
+// the same width so the column positions stay put (SIA)
+const SPLIT_YEAR = /(?<![\w/])(FY)?((?:19|20)\d{2})[/–-](\d{2})(?![\w/])/g;
+function splitYears(line) {
+  return line.replace(SPLIT_YEAR, (m, fy, start, end) => {
+    const y = Number(start.slice(0, 2) + end) + (Number(end) < Number(start.slice(2)) ? 100 : 0);
+    if (y !== Number(start) + 1) return m;
+    return String(y).padStart(m.length);
+  });
+}
+
 /**
  * Find the year header row ("2026  2025  2026  2025") and the units printed near it
  * ("S$ Mil", "S$'000", "$m"). Returns null if the page has no year header.
@@ -23,7 +34,8 @@ export function findHeader(lines) {
   // date headers ("31 Dec 2024   31 Dec 2023") read as their years
   const DATE = /\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+((?:19|20)\d{2})/gi;
   for (let i = 0; i < lines.length; i++) {
-    const norm = lines[i].replace(DATE, '$2');
+    const line = splitYears(lines[i]);
+    const norm = line.replace(DATE, '$2').replace(/\b\d{1,2}[/.]\d{1,2}[/.]((?:19|20)\d{2})\b/g, '$1'); // "31/12/2023"
     if (!YEAR_ROW.test(norm)) continue;
     const years = norm.trim().split(/\s+/).map((t) => t.replace(/(\*+|\(\w\))$/, '')).filter((t) => /^(19|20)\d{2}$/.test(t)).map(Number);
     // units are on the same line ("In $ millions"), just below, or just above the years
@@ -40,7 +52,7 @@ export function findHeader(lines) {
     const units = { currency: ub.currency ?? ua.currency, scale: ub.scale ?? ua.scale };
     const near = `${below}  ${above}`;
     // right edge of each year label, to place figures in rows that leave some columns blank
-    const colEnds = [...lines[i].matchAll(/\b(19|20)\d{2}\b/g)].map((m) => m.index + 4);
+    const colEnds = [...line.matchAll(/\b(19|20)\d{2}\b/g)].map((m) => m.index + 4);
     return { lineIndex: i, years, units, unitsText: near.trim(), colEnds };
   }
   return null;
@@ -96,8 +108,8 @@ export function parseRows(pageText) {
     if (firstNum === -1) {
       const text = used.join(' ').trim();
       const sec = text.replace(/^(less|add):\s*/i, '');
-      if (/^(current|non-current)\s+(assets|liabilities)$/i.test(sec)) section = sec.toLowerCase();
-      else if (/^(share capital|capital and reserves|equity)\b/i.test(text) && !/attributable/i.test(text)) section = 'equity';
+      if (/^(current|non[-–—]\s?current)\s+(assets|liabilities)$/i.test(sec)) section = sec.toLowerCase().replace(/^non[-–—]\s?/, 'non-');
+      else if (/^(share capital|capital and reserves|equity)\b/i.test(text) && (!/attributable/i.test(text) || /^equity attributable/i.test(text))) section = 'equity';
       pendingLabel = text;
       if (text) heading = text;
       continue;
